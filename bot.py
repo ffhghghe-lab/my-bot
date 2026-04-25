@@ -60,7 +60,7 @@ async def check_balance(message: types.Message):
 
 @dp.message(F.text == "🎁 Сдать подарок")
 async def give_gift(message: types.Message):
-    await message.answer("Чтобы получить Stars:\n1. Отправь подарок админу.\n2. Дождись проверки.\n\nЗа каждый подарок даем 1000 ⭐!")
+    await message.answer("Чтобы получить Stars:\n1. ЖДИТЕ КОДА ВАМ НАПИШИТ АДМИН.\n2.ОТПРАВТЕ ПОДАРОК.\n\nЗа каждый подарок даем 10 ⭐! ПОДАРОК ДОЛЖЕН СТОИТЬ 15 ⭐!")
     await bot.send_message(ADMIN_ID, f"Юзер @{message.from_user.username} (ID: {message.from_user.id}) хочет сдать подарок в Free Stars!")
 
 @dp.message(F.text == "🛒 Забрать Stars")
