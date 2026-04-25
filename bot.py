@@ -9,7 +9,7 @@ API_TOKEN = '8602042724:AAEWsiiG7wbDz6ZyQbAHEQiMjUWD8ad-I3c'
 ADMIN_ID = 8227495662 
 
 TASKS = [
-    {"id": "-1003923958803", "url": "https://t.me", "name": "Спонсор #1 🛡️", "reward": 0.15},
+    {"id": "-1003923958803", "url": "https://t.me/frem4ik1", "name": "Спонсор #1 🛡️", "reward": 0.15},
 ]
 
 bot = Bot(token=API_TOKEN)
@@ -51,10 +51,11 @@ menu_kb = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
+# --- ИСПРАВЛЕННЫЙ СТАРТ С РЕФЕРАЛКОЙ ---
 @dp.message(Command("start"))
 async def start(message: types.Message, command: CommandObject):
     user_id = message.from_user.id
-    args = command.args
+    args = command.args # Считываем ID после ?start=
     
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
@@ -62,20 +63,23 @@ async def start(message: types.Message, command: CommandObject):
     is_old = cursor.fetchone()
     
     if not is_old:
-        ref_id = int(args) if args and args.isdigit() and int(args) != user_id else None
+        ref_id = None
+        if args and args.isdigit():
+            ref_id = int(args)
+            if ref_id == user_id: ref_id = None # Нельзя пригласить самого себя
+        
         cursor.execute('INSERT INTO users (id, points, referrer_id, tasks_done) VALUES (?, 2.0, ?, 0)', (user_id, ref_id))
         conn.commit()
+        
         await message.answer("🌟 Добро пожаловать! Начислен бонус **2.0 Stars** ⭐", reply_markup=menu_kb)
         if ref_id:
-            try: await bot.send_message(ref_id, "🔔 По твоей ссылке зашел новый друг!")
-            except: pass
+            try:
+                await bot.send_message(ref_id, "🔔 По твоей ссылке зашел новый друг! Когда он выполнит 3 задания, ты получишь бонус.")
+            except:
+                pass
     else:
         await message.answer("С возвращением в Free Stars! 🌟", reply_markup=menu_kb)
     conn.close()
-
-@dp.message(F.text == "⭐ Мои Stars")
-async def check_balance(message: types.Message):
-    await message.answer(f"Твой баланс: {get_points(message.from_user.id)} Stars ⭐")
 
 @dp.message(F.text == "👥 Рефералы")
 async def referral_menu(message: types.Message):
@@ -118,6 +122,7 @@ async def check_sub(callback: types.CallbackQuery):
                 cursor.execute('INSERT INTO completed_tasks (user_id, task_id) VALUES (?, ?)', (user_id, t_id))
                 cursor.execute('UPDATE users SET points = points + ?, tasks_done = tasks_done + 1 WHERE id = ?', (t_data["reward"], user_id))
                 
+                # Проверка реферальной выплаты
                 cursor.execute('SELECT referrer_id, tasks_done FROM users WHERE id = ?', (user_id,))
                 row = cursor.fetchone()
                 if row and row[0] and row[1] == 3:
@@ -130,7 +135,7 @@ async def check_sub(callback: types.CallbackQuery):
                 await show_tasks(callback.message)
             conn.close()
         else: await callback.answer("❌ Сначала подпишись!", show_alert=True)
-    except: await callback.answer("⚠️ Ошибка: бот не админ в канале!", show_alert=True)
+    except: await callback.answer("⚠️ Ошибка: бот не админ!", show_alert=True)
 
 @dp.message(F.text == "🛒 Магазин")
 async def shop(message: types.Message):
@@ -140,7 +145,7 @@ async def shop(message: types.Message):
         [InlineKeyboardButton(text="🍾 Шампанское (45) 🔥", callback_data="buy_wine")],
         [InlineKeyboardButton(text="🚀 Ракета (44) 🔥", callback_data="buy_rocket")]
     ])
-    await message.answer("🛒 **Магазин Free Stars**\n\n🧸 Мишка — 15\n❤️ Сердечко — 15\n🍾 Шампанское — 45 (СКИДКА!)\n🚀 Ракета — 44 (СКИДКА!)", reply_markup=shop_kb)
+    await message.answer("🛒 **Магазин Free Stars**", reply_markup=shop_kb)
 
 @dp.callback_query(F.data.startswith("buy_"))
 async def process_buy(callback: types.CallbackQuery):
@@ -155,16 +160,11 @@ async def process_buy(callback: types.CallbackQuery):
 
 @dp.message(F.text == "ℹ️ Инфо")
 async def info_handler(message: types.Message):
-    await message.answer("🛡️ **Free Stars**\nЗадания -> Stars -> Подарки!\n\nАдмин: @твой_ник")
+    await message.answer("🛡️ **Free Stars**\nЗадания -> Stars -> Подарки!")
 
-@dp.message(Command("pay"))
-async def pay_points(message: types.Message):
-    if message.from_user.id == ADMIN_ID:
-        try:
-            _, u_id, amt = message.text.split()
-            add_points(int(u_id), float(amt))
-            await message.answer("✅ Готово!")
-        except: await message.answer("ID СУММА")
+@dp.message(F.text == "⭐ Мои Stars")
+async def check_balance(message: types.Message):
+    await message.answer(f"Твой баланс: {get_points(message.from_user.id)} Stars ⭐")
 
 async def main():
     init_db()
