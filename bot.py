@@ -8,7 +8,7 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMar
 API_TOKEN = '8602042724:AAEWsiiG7wbDz6ZyQbAHEQiMjUWD8ad-I3c'
 ADMIN_ID = 8227495662 
 
-# Список спонсоров (Чтобы рефералка работала на 3 заданиях, добавь сюда еще каналы)
+# Список спонсоров (Добавь сюда еще 2 канала, чтобы работала рефералка на 3 заданиях)
 TASKS = [
     {"id": "-1003923958803", "url": "https://t.me", "name": "Спонсор #1 🛡️", "reward": 0.15},
 ]
@@ -136,9 +136,8 @@ async def check_sub(callback: types.CallbackQuery):
             await callback.message.delete()
             await show_tasks(callback.message)
         else: await callback.answer("❌ Не подписан!", show_alert=True)
-    except: await callback.answer("⚠️ Ошибка админки!", show_alert=True)
+    except: await callback.answer("⚠️ Бот не админ в канале!", show_alert=True)
 
-# --- ВОЗВРАЩЕННЫЙ МАГАЗИН ---
 @dp.message(F.text == "🛒 Магазин")
 async def shop(message: types.Message):
     shop_kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -153,15 +152,23 @@ async def shop(message: types.Message):
 async def process_buy(callback: types.CallbackQuery):
     items = {"buy_bear": ("Мишку", 15), "buy_heart": ("Сердечко", 15), "buy_wine": ("Шампанское", 45), "buy_rocket": ("Ракету", 44)}
     name, price = items[callback.data]
-    if get_points(callback.from_user.id) >= price:
-        add_points(callback.from_user.id, -price)
-        await callback.message.answer(f"✅ Куплено: {name}! Админ свяжется с тобой.")
-        await bot.send_message(ADMIN_ID, f"💰 ПОКУПКА: {name} от {callback.from_user.id}\nСпиши: `/pay {callback.from_user.id} -{price}`")
+    user = callback.from_user
+    if get_points(user.id) >= price:
+        add_points(user.id, -price)
+        await callback.message.answer(f"✅ Куплено: {name}! Админ напишет тебе.")
+        
+        # Кнопка для админа
+        mention = f"[{user.first_name}](tg://user?id={user.id})"
+        admin_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💬 Написать покупателю", url=f"tg://user?id={user.id}")]
+        ])
+        
+        await bot.send_message(ADMIN_ID, f"💰 **НОВАЯ ПОКУПКА!**\n\n👤 Юзер: {mention}\n🎁 Товар: {name}\n🆔 ID: `{user.id}`", reply_markup=admin_kb, parse_mode="Markdown")
     else: await callback.answer("❌ Мало Stars!", show_alert=True)
 
 @dp.message(F.text == "ℹ️ Инфо")
 async def info(message: types.Message):
-    await message.answer("🛡️ **Free Stars**\nЗадания -> Stars -> Подарки!")
+    await message.answer("🛡️ **Free Stars**\nВыполняй задания -> копи Stars -> забирай подарки!")
 
 @dp.message(Command("pay"))
 async def pay_points(message: types.Message):
@@ -170,7 +177,8 @@ async def pay_points(message: types.Message):
             _, u_id, amt = message.text.split()
             add_points(int(u_id), float(amt))
             await message.answer("✅ Баланс обновлен!")
-        except: await message.answer("ID СУММА")
+            await bot.send_message(int(u_id), f"🌟 Твой баланс изменен на {amt} Stars!")
+        except: await message.answer("Ошибка! Пиши: /pay ID СУММА")
 
 async def main():
     init_db()
