@@ -11,7 +11,7 @@ ADMIN_ID = 8227495662
 # Список твоих спонсоров
 # ЗАМЕНИ @твой_канал на реальные ники своих каналов!
 TASKS = [
-    {"id": "@channel1", "url": "https://t.me", "name": "Спонсор #1 🛡️", "reward": 0.15},
+    {"id": "@frem4ik1", "url": "https://t.me/frem4ik1", "name": "Спонсор #1 🛡️", "reward": 0.15},
     {"id": "@channel2", "url": "https://t.me", "name": "Спонсор #2 🛡️", "reward": 0.15},
 ]
 
