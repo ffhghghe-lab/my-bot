@@ -8,11 +8,11 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMar
 API_TOKEN = '8602042724:AAEWsiiG7wbDz6ZyQbAHEQiMjUWD8ad-I3c'
 ADMIN_ID = 8227495662 
 
-# Список твоих спонсоров с твоим ID
+# Список твоих спонсоров
 TASKS = [
     {
-        "id": "-1003923958803", 
-        "url": "https://t.me./frem4ik1", # Твоя ссылка на канал
+        "id": "-1003923958803", # Твой ID канала
+        "url": "https://t.me", # Исправленная ссылка
         "name": "Спонсор #1 🛡️", 
         "reward": 0.15
     },
@@ -112,12 +112,12 @@ async def check_sub(callback: types.CallbackQuery):
             await show_tasks(callback.message)
         else:
             await callback.answer("❌ Подписка не найдена!", show_alert=True)
-    except Exception as e:
-        await callback.answer(f"⚠️ Бот не видит админку в канале {task_id}", show_alert=True)
+    except Exception:
+        await callback.answer(f"⚠️ Бот не видит админку в канале. Убедись, что бот — АДМИН!", show_alert=True)
 
 @dp.message(F.text == "ℹ️ Инфо")
 async def info(message: types.Message):
-    await message.answer("ℹ️ **Free Stars** — заработок Stars за подписки!\nПо вопросам: @твой_ник", parse_mode="Markdown")
+    await message.answer("ℹ️ **Free Stars** — заработок за подписки!", parse_mode="Markdown")
 
 @dp.message(F.text == "🛒 Магазин")
 async def shop(message: types.Message):
