@@ -17,4 +17,4 @@ jobs:
       - name: Install dependencies
         run: pip install aiogram
       - name: Run bot
-        run: python "мой бот.py"
+        run: python "bot.py"
