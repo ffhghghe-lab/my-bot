@@ -1,71 +1,92 @@
 import asyncio
-import logging
+import sqlite3
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
-# Твои данные уже здесь
+# Твои данные
 API_TOKEN = '8602042724:AAEWsiiG7wbDz6ZyQbAHEQiMjUWD8ad-I3c'
 ADMIN_ID = 8227495662 
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-# База данных (пока в памяти)
-users_db = {}
+# --- БАЗА ДАННЫХ ---
+def init_db():
+    conn = sqlite3.connect('database.db')
+    cursor = conn.cursor()
+    cursor.execute('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, points INTEGER DEFAULT 0)')
+    conn.commit()
+    conn.close()
 
-# Кнопки (в новой версии делаются чуть иначе)
+def get_points(user_id):
+    conn = sqlite3.connect('database.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT points FROM users WHERE id = ?', (user_id,))
+    res = cursor.fetchone()
+    conn.close()
+    return res[0] if res else 0
+
+def add_points(user_id, amount):
+    conn = sqlite3.connect('database.db')
+    cursor = conn.cursor()
+    cursor.execute('INSERT OR IGNORE INTO users (id, points) VALUES (?, 0)', (user_id,))
+    cursor.execute('UPDATE users SET points = points + ? WHERE id = ?', (amount, user_id))
+    conn.commit()
+    conn.close()
+
+# --- КНОПКИ (С НОВЫМ НАЗВАНИЕМ) ---
 menu_kb = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="💎 Мой баланс"), KeyboardButton(text="🎁 Сдать подарок")],
-        [KeyboardButton(text="🛒 Купить подарок"), KeyboardButton(text="ℹ️ Как это работает?")]
+        [KeyboardButton(text="⭐ Мои Stars"), KeyboardButton(text="🎁 Сдать подарок")],
+        [KeyboardButton(text="🛒 Забрать Stars"), KeyboardButton(text="ℹ️ О сервисе")]
     ],
     resize_keyboard=True
 )
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    user_id = message.from_user.id
-    if user_id not in users_db:
-        users_db[user_id] = 0
+    add_points(message.from_user.id, 0)
     await message.answer(
-        "Добро пожаловать в Барахолку Подарков! 🎁\nЗдесь можно обменять свои подарки на баллы или купить новые.", 
-        reply_markup=menu_kb
+        "Добро пожаловать в **Free Stars**! 🌟\n\nЗдесь ты можешь обменять свои обычные подарки на внутренние Stars и забирать крутые призы!", 
+        reply_markup=menu_kb,
+        parse_mode="Markdown"
     )
 
-@dp.message(F.text == "💎 Мой баланс")
+@dp.message(F.text == "⭐ Мои Stars")
 async def check_balance(message: types.Message):
-    balance = users_db.get(message.from_user.id, 0)
-    await message.answer(f"Твой текущий баланс: {balance} баллов 💎")
+    balance = get_points(message.from_user.id)
+    await message.answer(f"Твой баланс: {balance} Stars ⭐")
 
 @dp.message(F.text == "🎁 Сдать подарок")
 async def give_gift(message: types.Message):
-    await message.answer("Чтобы сдать подарок:\n1. Отправь его на мой аккаунт.\n2. Напиши мне.\n\nПосле проверки получишь 1000 баллов!")
-    await bot.send_message(ADMIN_ID, f"Юзер @{message.from_user.username} (ID: {message.from_user.id}) хочет сдать подарок!")
+    await message.answer("Чтобы получить Stars:\n1. Отправь подарок админу.\n2. Дождись проверки.\n\nЗа каждый подарок даем 1000 ⭐!")
+    await bot.send_message(ADMIN_ID, f"Юзер @{message.from_user.username} (ID: {message.from_user.id}) хочет сдать подарок в Free Stars!")
 
-@dp.message(F.text == "🛒 Купить подарок")
+@dp.message(F.text == "🛒 Забрать Stars")
 async def shop(message: types.Message):
-    await message.answer("В наличии пока 0 подарков. Заходи позже! 📭")
+    await message.answer("В магазине Free Stars пока пусто. Новые поступления будут скоро! 🔥")
 
-@dp.message(F.text == "ℹ️ Как это работает?")
+@dp.message(F.text == "ℹ️ О сервисе")
 async def info(message: types.Message):
-    await message.answer("Всё просто: ты даришь подарок админу — он дает тебе баллы. За баллы можно забрать другой подарок!")
+    await message.answer("Free Stars — это площадка для обмена подарками. Мы помогаем пользователям передаривать то, что им не нужно, за внутреннюю валюту!")
 
 @dp.message(Command("pay"))
 async def pay_points(message: types.Message):
     if message.from_user.id == ADMIN_ID:
         try:
             parts = message.text.split()
-            user_id = int(parts[1])
+            u_id = int(parts[1])
             amount = int(parts[2])
-            users_db[user_id] = users_db.get(user_id, 0) + amount
-            await message.answer(f"Выдали {amount} баллов пользователю {user_id}")
-            await bot.send_message(user_id, f"Баланс пополнен на {amount} баллов! 🎉")
+            add_points(u_id, amount)
+            await message.answer(f"Начислили {amount} Stars юзеру {u_id} ✅")
+            await bot.send_message(u_id, f"Твой баланс в Free Stars пополнен на {amount} ⭐!")
         except:
-            await message.answer("Ошибка. Пиши так: /pay ID СУММА")
+            await message.answer("Ошибка! Пиши: `/pay ID СУММА`", parse_mode="Markdown")
 
 async def main():
-    print("Бот запущен!")
+    init_db()
+    print("Бот Free Stars запущен!")
     await dp.start_polling(bot)
 
 if __name__ == '__main__':
