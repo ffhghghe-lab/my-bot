@@ -78,14 +78,15 @@ async def start(message: types.Message, command: CommandObject):
 @dp.message(F.text == "👥 Рефералы")
 async def referral_menu(message: types.Message):
     me = await bot.get_me()
-    # Добавлен / после t.me
-    ref_link = f"https://t.me{me.username}?start={message.from_user.id}"
+    # Вот здесь я добавил / после t.me
+    ref_link = f"https://t.me/{me.username}?start={message.from_user.id}"
     await message.answer(
         f"👥 **Реферальная система**\n\n"
         f"Твоя ссылка: `{ref_link}`\n\n"
         f"Если друг выполнит **3 задания**, ты получишь **1.5 Stars** ⭐", 
         parse_mode="Markdown"
     )
+
 
 @dp.message(F.text == "📝 Задания")
 async def show_tasks(message: types.Message):
