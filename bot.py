@@ -36,11 +36,12 @@ def get_points(user_id):
 def add_points(user_id, amount):
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
+    cursor.execute('INSERT OR IGNORE INTO users (id, points) VALUES (?, 0)', (user_id,))
     cursor.execute('UPDATE users SET points = points + ? WHERE id = ?', (amount, user_id))
     conn.commit()
     conn.close()
 
-# --- КНОПКИ ---
+# --- МЕНЮ ---
 menu_kb = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="⭐ Мои Stars"), KeyboardButton(text="📝 Задания")],
@@ -71,6 +72,10 @@ async def start(message: types.Message, command: CommandObject):
     else:
         await message.answer("С возвращением в Free Stars! 🌟", reply_markup=menu_kb)
     conn.close()
+
+@dp.message(F.text == "⭐ Мои Stars")
+async def check_balance(message: types.Message):
+    await message.answer(f"Твой баланс: {get_points(message.from_user.id)} Stars ⭐")
 
 @dp.message(F.text == "👥 Рефералы")
 async def referral_menu(message: types.Message):
@@ -106,7 +111,6 @@ async def check_sub(callback: types.CallbackQuery):
     try:
         m = await bot.get_chat_member(chat_id=t_id, user_id=user_id)
         if m.status in ["member", "administrator", "creator"]:
-            # СТРОГАЯ ПРОВЕРКА: только если еще не делал
             conn = sqlite3.connect('database.db')
             cursor = conn.cursor()
             cursor.execute('SELECT 1 FROM completed_tasks WHERE user_id = ? AND task_id = ?', (user_id, t_id))
@@ -114,7 +118,6 @@ async def check_sub(callback: types.CallbackQuery):
                 cursor.execute('INSERT INTO completed_tasks (user_id, task_id) VALUES (?, ?)', (user_id, t_id))
                 cursor.execute('UPDATE users SET points = points + ?, tasks_done = tasks_done + 1 WHERE id = ?', (t_data["reward"], user_id))
                 
-                # Проверка рефералки (награда пригласившему за 3-е задание друга)
                 cursor.execute('SELECT referrer_id, tasks_done FROM users WHERE id = ?', (user_id,))
                 row = cursor.fetchone()
                 if row and row[0] and row[1] == 3:
@@ -133,25 +136,26 @@ async def check_sub(callback: types.CallbackQuery):
 async def shop(message: types.Message):
     shop_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🧸 Мишка (15)", callback_data="buy_bear")],
+        [InlineKeyboardButton(text="❤️ Сердечко (15)", callback_data="buy_heart")],
+        [InlineKeyboardButton(text="🍾 Шампанское (45) 🔥", callback_data="buy_wine")],
         [InlineKeyboardButton(text="🚀 Ракета (44) 🔥", callback_data="buy_rocket")]
     ])
-    await message.answer("🛒 Магазин:", reply_markup=shop_kb)
+    await message.answer("🛒 **Магазин Free Stars**\n\n🧸 Мишка — 15\n❤️ Сердечко — 15\n🍾 Шампанское — 45 (СКИДКА!)\n🚀 Ракета — 44 (СКИДКА!)", reply_markup=shop_kb)
 
 @dp.callback_query(F.data.startswith("buy_"))
 async def process_buy(callback: types.CallbackQuery):
-    items = {"buy_bear": ("Мишку", 15), "buy_rocket": ("Ракету", 44)}
+    items = {"buy_bear": ("Мишку", 15), "buy_heart": ("Сердечко", 15), "buy_wine": ("Шампанское", 45), "buy_rocket": ("Ракету", 44)}
     name, price = items[callback.data]
-    balance = get_points(callback.from_user.id)
-    if balance >= price:
+    if get_points(callback.from_user.id) >= price:
         add_points(callback.from_user.id, -price)
         await callback.message.answer(f"✅ Куплено: {name}!")
         mention = f"[{callback.from_user.first_name}](tg://user?id={callback.from_user.id})"
         await bot.send_message(ADMIN_ID, f"💰 ПОКУПКА: {name}\nЮзер: {mention}", parse_mode="Markdown")
     else: await callback.answer("❌ Мало Stars!", show_alert=True)
 
-@dp.message(F.text == "⭐ Мои Stars")
-async def check_balance(message: types.Message):
-    await message.answer(f"Твой баланс: {get_points(message.from_user.id)} Stars ⭐")
+@dp.message(F.text == "ℹ️ Инфо")
+async def info_handler(message: types.Message):
+    await message.answer("🛡️ **Free Stars**\nЗадания -> Stars -> Подарки!\n\nАдмин: @твой_ник")
 
 @dp.message(Command("pay"))
 async def pay_points(message: types.Message):
@@ -159,7 +163,7 @@ async def pay_points(message: types.Message):
         try:
             _, u_id, amt = message.text.split()
             add_points(int(u_id), float(amt))
-            await message.answer("✅ Баланс обновлен!")
+            await message.answer("✅ Готово!")
         except: await message.answer("ID СУММА")
 
 async def main():
