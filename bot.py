@@ -166,15 +166,30 @@ async def show_ref(message: types.Message):
 
 @dp.message(F.text == "🏆 Топ")
 async def show_top(message: types.Message):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('SELECT username, points FROM users ORDER BY points DESC LIMIT 10')
-    top = cursor.fetchall()
-    conn.close()
-    text = "🏆 **Топ-10 игроков:**\n\n"
-    for i, (name, pts) in enumerate(top, 1):
-        text += f"{i}. {name or 'Аноним'} — {round(pts, 2)} ⭐\n"
-    await message.answer(text, parse_mode="Markdown")
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        # Выбираем только тех, у кого имя не пустое и сортируем по очкам
+        cursor.execute('SELECT username, points FROM users ORDER BY points DESC LIMIT 10')
+        top_users = cursor.fetchall()
+        conn.close()
+        
+        if not top_users:
+            return await message.answer("🏆 Таблица лидеров пока пуста!")
+
+        text = "🏆 **Топ-10 игроков:**\n\n"
+        for i, (name, pts) in enumerate(top_users, 1):
+            # Если ника нет, пишем 'Игрок'
+            display_name = str(name) if name else f"Игрок {i}"
+            # Убираем символы, которые могут сломать Markdown
+            display_name = display_name.replace("_", "\\_").replace("*", "")
+            text += f"{i}. {display_name} — **{round(pts, 2)}** ⭐\n"
+        
+        await message.answer(text, parse_mode="Markdown")
+    except Exception as e:
+        print(f"Ошибка в Топе: {e}")
+        await message.answer("⚠️ Ошибка при загрузке таблицы лидеров.")
+
 
 @dp.message(F.text == "🛒 Магазин")
 async def shop(message: types.Message):
