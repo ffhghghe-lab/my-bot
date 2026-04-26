@@ -6,11 +6,10 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMar
 
 # --- НАСТРОЙКИ ---
 API_TOKEN = '8602042724:AAEWsiiG7wbDz6ZyQbAHEQiMjUWD8ad-I3c'
-ADMIN_ID = 8227495662 
+ADMIN_ID = 8227495662  # Твой ID
 
-# Твои спонсоры (добавь еще 2 для работы рефералки)
 TASKS = [
-    {"id": "-1003923958803", "url": "https://t.me/frem4ik1", "name": "Спонсор #1 🛡️", "reward": 0.15},
+    {"id": "-1003923958803", "url": "https://t.me", "name": "Спонсор #1 🛡️", "reward": 0.15},
 ]
 
 bot = Bot(token=API_TOKEN)
@@ -21,8 +20,9 @@ def init_db():
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
     cursor.execute('''CREATE TABLE IF NOT EXISTS users 
-                      (id INTEGER PRIMARY KEY, points REAL DEFAULT 0, referrer_id INTEGER, tasks_done INTEGER DEFAULT 0)''')
-    cursor.execute('CREATE TABLE IF NOT EXISTS completed_tasks (user_id INTEGER, task_id TEXT, PRIMARY KEY (user_id, task_id))')
+                      (id INTEGER PRIMARY KEY, points REAL DEFAULT 0, referrer_id INTEGER, tasks_done INTEGER DEFAULT 0, username TEXT)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS completed_tasks 
+                      (user_id INTEGER, task_id TEXT, PRIMARY KEY (user_id, task_id))''')
     conn.commit()
     conn.close()
 
@@ -37,17 +37,44 @@ def get_points(user_id):
 def add_points(user_id, amount):
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
-    cursor.execute('INSERT OR IGNORE INTO users (id, points) VALUES (?, 0)', (user_id,))
+    cursor.execute('INSERT OR IGNORE INTO users (id, points, tasks_done) VALUES (?, 0, 0)', (user_id,))
     cursor.execute('UPDATE users SET points = points + ? WHERE id = ?', (amount, user_id))
     conn.commit()
     conn.close()
+
+# --- АДМИН-КОМАНДА /pay ---
+@dp.message(Command("pay"))
+async def admin_pay(message: types.Message, command: CommandObject):
+    if message.from_user.id != ADMIN_ID:
+        return # Игнорируем, если пишет не админ
+
+    if not command.args:
+        return await message.answer("⚠️ Формат: `/pay ID сумма`", parse_mode="Markdown")
+
+    try:
+        args = command.args.split()
+        target_id = int(args[0])
+        amount = float(args[1])
+        
+        add_points(target_id, amount)
+        
+        await message.answer(f"✅ Начислено **{amount}** Stars пользователю `{target_id}`", parse_mode="Markdown")
+        
+        # Уведомляем пользователя
+        try:
+            await bot.send_message(target_id, f"🎁 Админ начислил тебе **{amount}** Stars!")
+        except:
+            pass
+            
+    except (ValueError, IndexError):
+        await message.answer("❌ Ошибка! Используй: `/pay 12345678 100` (ID и сумма)")
 
 # --- МЕНЮ ---
 menu_kb = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="⭐ Мои Stars"), KeyboardButton(text="📝 Задания")],
         [KeyboardButton(text="👥 Рефералы"), KeyboardButton(text="🛒 Магазин")],
-        [KeyboardButton(text="ℹ️ Инфо")]
+        [KeyboardButton(text="🏆 Топ")]
     ],
     resize_keyboard=True
 )
@@ -55,6 +82,7 @@ menu_kb = ReplyKeyboardMarkup(
 @dp.message(Command("start"))
 async def start(message: types.Message, command: CommandObject):
     user_id = message.from_user.id
+    username = message.from_user.username or message.from_user.first_name
     args = command.args
     
     conn = sqlite3.connect('database.db')
@@ -64,29 +92,42 @@ async def start(message: types.Message, command: CommandObject):
     
     if not is_old:
         ref_id = int(args) if args and args.isdigit() and int(args) != user_id else None
-        cursor.execute('INSERT INTO users (id, points, referrer_id, tasks_done) VALUES (?, 2.0, ?, 0)', (user_id, ref_id))
+        cursor.execute('INSERT INTO users (id, points, referrer_id, tasks_done, username) VALUES (?, 2.0, ?, 0, ?)', 
+                       (user_id, ref_id, username))
         conn.commit()
-        await message.answer("🌟 Добро пожаловать! Начислен бонус **2.0 Stars** ⭐", reply_markup=menu_kb)
-        if ref_id:
-            try: await bot.send_message(ref_id, "🔔 По твоей ссылке зашел новый друг! Когда он выполнит 3 задания, ты получишь 1.5 Stars.")
-            except: pass
+        await message.answer("🌟 Добро пожаловать! Начислен бонус **2.0 Stars** ⭐", reply_markup=menu_kb, parse_mode="Markdown")
     else:
+        cursor.execute('UPDATE users SET username = ? WHERE id = ?', (username, user_id))
+        conn.commit()
         await message.answer("С возвращением в Free Stars! 🌟", reply_markup=menu_kb)
     conn.close()
 
-# --- ИСПРАВЛЕННАЯ РЕФЕРАЛЬНАЯ ССЫЛКА ---
+@dp.message(F.text == "🏆 Топ")
+async def show_leaderboard(message: types.Message):
+    conn = sqlite3.connect('database.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT username, points FROM users ORDER BY points DESC LIMIT 10')
+    top_users = cursor.fetchall()
+    conn.close()
+
+    text = "🏆 **Таблица лидеров**\n\n"
+    for i, (name, points) in enumerate(top_users, 1):
+        medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
+        safe_name = name.replace("_", "\\_") if name else "Аноним"
+        text += f"{medal} {safe_name} — `{round(points, 2)}` ⭐\n"
+    
+    await message.answer(text, parse_mode="Markdown")
+
+@dp.message(F.text == "⭐ Мои Stars")
+async def check_balance_btn(message: types.Message):
+    balance = get_points(message.from_user.id)
+    await message.answer(f"Твой баланс: {balance} Stars ⭐")
+
 @dp.message(F.text == "👥 Рефералы")
 async def referral_menu(message: types.Message):
     me = await bot.get_me()
-    # Вот здесь я добавил / после t.me
-    ref_link = f"https://t.me/{me.username}?start={message.from_user.id}"
-    await message.answer(
-        f"👥 **Реферальная система**\n\n"
-        f"Твоя ссылка: `{ref_link}`\n\n"
-        f"Если друг выполнит **3 задания**, ты получишь **1.5 Stars** ⭐", 
-        parse_mode="Markdown"
-    )
-
+    ref_link = f"https://t.me{me.username}?start={message.from_user.id}"
+    await message.answer(f"👥 **Рефералы**\nТвоя ссылка: `{ref_link}`\n\nЗа 3 задания друга: **1.5 Stars**", parse_mode="Markdown")
 
 @dp.message(F.text == "📝 Задания")
 async def show_tasks(message: types.Message):
@@ -98,7 +139,8 @@ async def show_tasks(message: types.Message):
     conn.close()
     
     available = [t for t in TASKS if t["id"] not in done_ids]
-    if not available: return await message.answer("✅ Задания выполнены!")
+    if not available:
+        return await message.answer("✅ Все задания выполнены!")
     
     task = available[0]
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -122,49 +164,34 @@ async def check_sub(callback: types.CallbackQuery):
             if not cursor.fetchone():
                 cursor.execute('INSERT INTO completed_tasks (user_id, task_id) VALUES (?, ?)', (user_id, t_id))
                 cursor.execute('UPDATE users SET points = points + ?, tasks_done = tasks_done + 1 WHERE id = ?', (t_data["reward"], user_id))
-                
-                cursor.execute('SELECT referrer_id, tasks_done FROM users WHERE id = ?', (user_id,))
-                row = cursor.fetchone()
-                if row and row[0] and row[1] == 3:
-                    cursor.execute('UPDATE users SET points = points + 1.5 WHERE id = ?', (row[0],))
-                    try: await bot.send_message(row[0], "🎁 Реферал выполнил 3 задания! Тебе начислено 1.5 Stars!")
-                    except: pass
                 conn.commit()
                 await callback.answer(f"✅ +{t_data['reward']} Stars!", show_alert=True)
                 await callback.message.delete()
                 await show_tasks(callback.message)
             conn.close()
-        else: await callback.answer("❌ Сначала подпишись!", show_alert=True)
-    except: await callback.answer("⚠️ Бот не админ в канале!", show_alert=True)
+        else:
+            await callback.answer("❌ Сначала подпишись!", show_alert=True)
+    except:
+        await callback.answer("⚠️ Ошибка проверки.", show_alert=True)
 
 @dp.message(F.text == "🛒 Магазин")
 async def shop(message: types.Message):
     shop_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🧸 Мишка (15)", callback_data="buy_bear")],
-        [InlineKeyboardButton(text="❤️ Сердечко (15)", callback_data="buy_heart")],
-        [InlineKeyboardButton(text="🍾 Шампанское (45) 🔥", callback_data="buy_wine")],
-        [InlineKeyboardButton(text="🚀 Ракета (44) 🔥", callback_data="buy_rocket")]
+        [InlineKeyboardButton(text="❤️ Сердечко (15)", callback_data="buy_heart")]
     ])
-    await message.answer("🛒 **Магазин Free Stars**\n\n🧸 Мишка — 15\n❤️ Сердечко — 15\n🍾 Шампанское — 45 (СКИДКА!)\n🚀 Ракета — 44 (СКИДКА!)", reply_markup=shop_kb)
+    await message.answer("🛒 **Магазин Подарков**", reply_markup=shop_kb)
 
 @dp.callback_query(F.data.startswith("buy_"))
 async def process_buy(callback: types.CallbackQuery):
-    items = {"buy_bear": ("Мишку", 15), "buy_heart": ("Сердечко", 15), "buy_wine": ("Шампанское", 45), "buy_rocket": ("Ракету", 44)}
+    items = {"buy_bear": ("Мишку", 15), "buy_heart": ("Сердечко", 15)}
     name, price = items[callback.data]
     if get_points(callback.from_user.id) >= price:
         add_points(callback.from_user.id, -price)
-        await callback.message.answer(f"✅ Куплено: {name}! Админ свяжется с тобой.")
-        mention = f"[{callback.from_user.first_name}](tg://user?id={callback.from_user.id})"
-        await bot.send_message(ADMIN_ID, f"💰 ПОКУПКА: {name}\nЮзер: {mention}", parse_mode="Markdown")
-    else: await callback.answer("❌ Мало Stars!", show_alert=True)
-
-@dp.message(F.text == "ℹ️ Инфо")
-async def info_handler(message: types.Message):
-    await message.answer("🛡️ **Free Stars**\nЗадания -> Stars -> Подарки!\n\nАдмин: @твой_ник")
-
-@dp.message(F.text == "⭐ Мои Stars")
-async def check_balance(message: types.Message):
-    await message.answer(f"Твой баланс: {get_points(message.from_user.id)} Stars ⭐")
+        await callback.message.answer(f"✅ Куплено: {name}!")
+        await bot.send_message(ADMIN_ID, f"💰 КУПИЛИ: {name}\nЮзер: {callback.from_user.id}")
+    else:
+        await callback.answer("❌ Мало Stars!", show_alert=True)
 
 async def main():
     init_db()
