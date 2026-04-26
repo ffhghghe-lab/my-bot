@@ -13,15 +13,15 @@ ADMIN_ID = 8227495662
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "database.db")
 
-# ЗАДАНИЯ СПОНСОРОВ
+# Добавь 3+ спонсора для работы бонуса 1.5 звезды
 SPONSORS = [
     {"id": "-1003250003175", "url": "https://t.me/+uatBuhGV_F9jOGZi", "name": "Спонсор #1 🛡️", "reward": 0.15},
-    {"id": "-1001234567890", "url": "https://t.me", "name": "Спонсор #2 🎁", "reward": 0.15},
-    {"id": "-1001112223334", "url": "https://t.me", "name": "Спонсор #3 🚀", "reward": 0.15},
+    {"id": "-1003923958803", "url": "https://t.me/frem4ik1", "name": "Спонсор #2 🎁", "reward": 0.15},
+
 ]
 
 OUR_CHANNELS = [
-    {"name": "Наш основной канал 📢", "url": "https://t.me/freestars_vasbot"},
+    {"name": "Наш основной канал 📢", "url": "https://t.me/freestars_vashbot"},
 ]
 
 bot = Bot(token=API_TOKEN)
@@ -29,30 +29,23 @@ dp = Dispatcher()
 
 # --- БАЗА ДАННЫХ ---
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''CREATE TABLE IF NOT EXISTS users 
-                      (id INTEGER PRIMARY KEY, points REAL DEFAULT 0, referrer_id INTEGER, tasks_done INTEGER DEFAULT 0, username TEXT)''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS completed_tasks 
-                      (user_id INTEGER, task_id TEXT, PRIMARY KEY (user_id, task_id))''')
-    conn.commit()
-    conn.close()
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, points REAL DEFAULT 0, referrer_id INTEGER, tasks_done INTEGER DEFAULT 0, username TEXT)''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS completed_tasks (user_id INTEGER, task_id TEXT, PRIMARY KEY (user_id, task_id))''')
 
 def get_points(user_id):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('SELECT points FROM users WHERE id = ?', (user_id,))
-    res = cursor.fetchone()
-    conn.close()
-    return round(res[0], 2) if res else 0.0
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT points FROM users WHERE id = ?', (user_id,))
+        res = cursor.fetchone()
+        return round(res[0], 2) if res else 0.0
 
 def add_points(user_id, amount):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('INSERT OR IGNORE INTO users (id, points, tasks_done) VALUES (?, 0, 0)', (user_id,))
-    cursor.execute('UPDATE users SET points = points + ? WHERE id = ?', (amount, user_id))
-    conn.commit()
-    conn.close()
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute('INSERT OR IGNORE INTO users (id, points, tasks_done) VALUES (?, 0, 0)', (user_id,))
+        cursor.execute('UPDATE users SET points = points + ? WHERE id = ?', (amount, user_id))
 
 # --- МЕНЮ ---
 menu_kb = ReplyKeyboardMarkup(
@@ -64,184 +57,139 @@ menu_kb = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
+# --- ОБРАБОТЧИКИ ---
+
 @dp.message(Command("start"))
 async def start(message: types.Message, command: CommandObject):
     user_id = message.from_user.id
     username = message.from_user.username or message.from_user.first_name
     args = command.args
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('SELECT 1 FROM users WHERE id = ?', (user_id,))
-    if not cursor.fetchone():
-        ref_id = int(args) if args and args.isdigit() and int(args) != user_id else None
-        cursor.execute('INSERT INTO users (id, points, referrer_id, tasks_done, username) VALUES (?, 2.0, ?, 0, ?)', 
-                       (user_id, ref_id, username))
-        conn.commit()
-        await message.answer("🌟 Бонус **2.0 Stars** начислен!", reply_markup=menu_kb, parse_mode="Markdown")
-    else:
-        cursor.execute('UPDATE users SET username = ? WHERE id = ?', (username, user_id))
-        conn.commit()
-        await message.answer("С возвращением! 🌟", reply_markup=menu_kb)
-    conn.close()
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT 1 FROM users WHERE id = ?', (user_id,))
+        if not cursor.fetchone():
+            ref_id = int(args) if args and args.isdigit() and int(args) != user_id else None
+            cursor.execute('INSERT INTO users (id, points, referrer_id, tasks_done, username) VALUES (?, 2.0, ?, 0, ?)', (user_id, ref_id, username))
+            await message.answer("🌟 Бонус **2.0 Stars** начислен!", reply_markup=menu_kb, parse_mode="Markdown")
+            if ref_id:
+                try: await bot.send_message(ref_id, f"🔔 Друг @{username} зашел по ссылке!")
+                except: pass
+        else:
+            cursor.execute('UPDATE users SET username = ? WHERE id = ?', (username, user_id))
+            await message.answer("С возвращением! 🌟", reply_markup=menu_kb)
 
-# --- ЛОГИКА ЗАДАНИЙ ПО ПОРЯДКУ ---
-@dp.callback_query(F.data.startswith("skip_"))
-async def skip_task(callback: types.CallbackQuery):
-    t_id = callback.data.replace("skip_", "")
-    user_id = callback.from_user.id
-    
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    # Помечаем задание как выполненное (без начисления баллов)
-    cursor.execute('INSERT OR IGNORE INTO completed_tasks (user_id, task_id) VALUES (?, ?)', (user_id, t_id))
-    conn.commit()
-    conn.close()
-    
-    await callback.answer("⏩ Задание пропущено")
-    await callback.message.delete()
-    
-    # Сразу проверяем, есть ли что-то еще в списке SPONSORS
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('SELECT task_id FROM completed_tasks WHERE user_id = ?', (user_id,))
-    done_ids = [r[0] for r in cursor.fetchall()]
-    conn.close()
-    
-    available = [t for t in SPONSORS if t["id"] not in done_ids]
-    
-    if available:
-        # Если есть еще задания - показываем следующее
-        await show_tasks(callback.message)
-    else:
-        # Если больше ничего нет - пишем финал
-        await callback.message.answer("✅ **Все задания выполнены!**\nНовые появятся позже. 🚀", parse_mode="Markdown")
+@dp.message(F.text == "👥 Рефералы")
+async def show_ref(message: types.Message):
+    user_id = message.from_user.id
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT COUNT(*) FROM users WHERE referrer_id = ?', (user_id,))
+        cnt = cursor.fetchone()[0]
+    me = await bot.get_me()
+    link = f"https://t.me/{me.username}?start={user_id}"
+    await message.answer(f"👥 **Рефералы**\n\nТвоя ссылка: `{link}`\nПриглашено: **{cnt}** чел.\n\nЗа каждого друга, который выполнит 3 задания, ты получишь **1.5 Stars**! ⭐", parse_mode="Markdown")
 
 @dp.message(F.text == "📝 Задания")
 async def show_tasks(message: types.Message):
     user_id = message.from_user.id
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('SELECT task_id FROM completed_tasks WHERE user_id = ?', (user_id,))
-    done_ids = [r[0] for r in cursor.fetchall()]
-    conn.close()
-    
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT task_id FROM completed_tasks WHERE user_id = ?', (user_id,))
+        done_ids = [r[0] for r in cursor.fetchall()]
     available = [t for t in SPONSORS if t["id"] not in done_ids]
-    
-    if not available:
-        # Важно: если юзер нажал кнопку, а заданий нет, пишем это сразу
-        return await message.answer("✅ **Все задания выполнены!**\nНовые появятся позже. 🚀", parse_mode="Markdown")
-    
-    task = available[0] # Берем первое из оставшихся
+    if not available: return await message.answer("✅ Все задания выполнены!")
+    task = available[0]
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="1. Подписаться 🛡️", url=task["url"])],
+        [InlineKeyboardButton(text="1. Подписаться", url=task["url"])],
         [InlineKeyboardButton(text="2. Проверить ✅", callback_data=f"check_{task['id']}")],
         [InlineKeyboardButton(text="⏩ Пропустить", callback_data=f"skip_{task['id']}")]
     ])
-    await message.answer(f"🚀 **Задание:** {task['name']}\nНаграда: {task['reward']} Stars", reply_markup=kb, parse_mode="Markdown")
-
+    await message.answer(f"🚀 Задание: {task['name']}", reply_markup=kb)
 
 @dp.callback_query(F.data.startswith("check_"))
 async def check_sub(callback: types.CallbackQuery):
     t_id = callback.data.replace("check_", "")
     user_id = callback.from_user.id
     t_data = next((t for t in SPONSORS if t["id"] == t_id), None)
-    
     try:
         m = await bot.get_chat_member(chat_id=t_id, user_id=user_id)
         if m.status in ["member", "administrator", "creator"]:
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute('INSERT INTO completed_tasks (user_id, task_id) VALUES (?, ?)', (user_id, t_id))
-            cursor.execute('UPDATE users SET points = points + ?, tasks_done = tasks_done + 1 WHERE id = ?', (t_data["reward"], user_id))
-            
-            # Проверка рефералки на 3 задания
-            cursor.execute('SELECT referrer_id, tasks_done FROM users WHERE id = ?', (user_id,))
-            row = cursor.fetchone()
-            if row and row[0] and row[1] == 3:
-                cursor.execute('UPDATE users SET points = points + 1.5 WHERE id = ?', (row[0],))
-                try: await bot.send_message(row[0], "🎁 Твой реферал выполнил 3 задания! +1.5 Stars!")
-                except: pass
-            
-            conn.commit()
-            conn.close()
+            with sqlite3.connect(DB_PATH) as conn:
+                cursor = conn.cursor()
+                cursor.execute('INSERT INTO completed_tasks (user_id, task_id) VALUES (?, ?)', (user_id, t_id))
+                cursor.execute('UPDATE users SET points = points + ?, tasks_done = tasks_done + 1 WHERE id = ?', (t_data["reward"], user_id))
+                # Выдача 1.5 Stars рефереру на 3-м задании
+                cursor.execute('SELECT referrer_id, tasks_done FROM users WHERE id = ?', (user_id,))
+                row = cursor.fetchone()
+                if row and row[0] and row[1] == 3:
+                    cursor.execute('UPDATE users SET points = points + 1.5 WHERE id = ?', (row[0],))
+                    try: await bot.send_message(row[0], "🎁 Реферал выполнил 3 задания! +1.5 Stars!")
+                    except: pass
             await callback.answer(f"✅ +{t_data['reward']} Stars!", show_alert=True)
             await callback.message.delete()
             await show_tasks(callback.message)
         else:
-            await callback.answer("❌ Подписка не найдена!", show_alert=True)
-    except:
-        await callback.answer("⚠️ Бот не админ в канале!", show_alert=True)
+            await callback.answer("❌ Сначала подпишись!", show_alert=True)
+    except: await callback.answer("⚠️ Ошибка проверки.", show_alert=True)
 
 @dp.callback_query(F.data.startswith("skip_"))
-async def skip_task(callback: types.CallbackQuery):
-    t_id = callback.data.replace("skip_", "")
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('INSERT OR IGNORE INTO completed_tasks (user_id, task_id) VALUES (?, ?)', (callback.from_user.id, t_id))
-    conn.commit()
-    conn.close()
-    await callback.message.delete()
-    await show_tasks(callback.message)
+async def skip(c: types.CallbackQuery):
+    t_id = c.data.replace("skip_", "")
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute('INSERT OR IGNORE INTO completed_tasks (user_id, task_id) VALUES (?, ?)', (c.from_user.id, t_id))
+    await c.message.delete()
+    await show_tasks(c.message)
 
-# --- МАГАЗИН И УВЕДОМЛЕНИЯ АДМИНУ ---
-@dp.callback_query(F.data.startswith("buy_"))
-async def process_buy(callback: types.CallbackQuery):
-    items = {"buy_bear": ("Мишку", 15), "buy_heart": ("Сердечко", 15), "buy_wine": ("Шампанское", 45), "buy_rocket": ("Ракету", 44)}
-    name, price = items[callback.data]
-    user_id = callback.from_user.id
-    username = callback.from_user.username
-    
-    if get_points(user_id) >= price:
-        add_points(user_id, -price)
-        await callback.message.answer(f"✅ Куплено: {name}! Админ свяжется с тобой.")
-        
-        # Красивое уведомление админу
-        contact_url = f"https://t.me{username}" if username else f"tg://user?id={user_id}"
-        admin_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💬 Написать покупателю", url=contact_url)]])
-        
-        admin_text = (
-            f"💰 **НОВАЯ ПОКУПКА!**\n\n"
-            f"👤 Юзер: @{username if username else user_id}\n"
-            f"🎁 Товар: {name}\n"
-            f"🆔 ID: `{user_id}`"
-        )
-        
-        await bot.send_message(ADMIN_ID, admin_text, parse_mode="Markdown", reply_markup=admin_kb)
-    else:
-        await callback.answer("❌ Мало Stars!", show_alert=True)
-
-# Остальные кнопки
 @dp.message(F.text == "🏆 Топ")
-async def show_top(message: types.Message):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('SELECT username, points FROM users ORDER BY points DESC LIMIT 10')
-    top = cursor.fetchall()
-    conn.close()
-    text = "🏆 **Топ-10 игроков:**\n\n"
-    for i, (name, pts) in enumerate(top, 1):
+async def show_top(m: types.Message):
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT username, points FROM users ORDER BY points DESC LIMIT 10')
+        data = cursor.fetchall()
+    text = "🏆 **Топ игроков:**\n\n"
+    for i, (name, pts) in enumerate(data, 1):
         text += f"{i}. {name or 'Аноним'} — {round(pts, 2)} ⭐\n"
-    await message.answer(text, parse_mode="Markdown")
+    await m.answer(text, parse_mode="Markdown")
 
-@dp.message(F.text == "👥 Рефералы")
-async def show_ref(message: types.Message):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('SELECT COUNT(*) FROM users WHERE referrer_id = ?', (message.from_user.id,))
-    cnt = cursor.fetchone()[0]
-    conn.close()
-    me = await bot.get_me()
-    link = f"https://t.me/{me.username}?start={message.from_user.id}"
-    await message.answer(f"👥 **Рефералы**\n\nСсылка: `{link}`\nПриглашено: **{cnt}** чел.\n\nБонус 1.5 ⭐ за 3 задания друга!", parse_mode="Markdown")
+@dp.message(F.text == "🛒 Магазин")
+async def shop(m: types.Message):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🧸 Мишка (15)", callback_data="buy_bear")],
+        [InlineKeyboardButton(text="❤️ Сердечко (15)", callback_data="buy_heart")],
+        [InlineKeyboardButton(text="🍾 Шампанское (45)", callback_data="buy_wine")],
+        [InlineKeyboardButton(text="🚀 Ракета (44)", callback_data="buy_rocket")]
+    ])
+    await m.answer("🛒 **Магазин**", reply_markup=kb)
+
+@dp.callback_query(F.data.startswith("buy_"))
+async def process_buy(c: types.CallbackQuery):
+    items = {"buy_bear": ("Мишку", 15), "buy_heart": ("Сердечко", 15), "buy_wine": ("Шампанское", 45), "buy_rocket": ("Ракету", 44)}
+    name, price = items[c.data]
+    if get_points(c.from_user.id) >= price:
+        add_points(c.from_user.id, -price)
+        await c.message.answer(f"✅ Куплено: {name}!")
+        contact = f"https://t.me{c.from_user.username}" if c.from_user.username else f"tg://user?id={c.from_user.id}"
+        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💬 Написать", url=contact)]])
+        await bot.send_message(ADMIN_ID, f"💰 **НОВАЯ ПОКУПКА**\nЮзер: @{c.from_user.username or c.from_user.id}\n🎁: {name}", reply_markup=kb)
+    else: await c.answer("❌ Мало Stars!", show_alert=True)
 
 @dp.message(F.text == "📢 Каналы")
-async def show_chan(message: types.Message):
+async def show_chan(m: types.Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=c['name'], url=c['url'])] for c in OUR_CHANNELS])
-    await message.answer("📢 Наши каналы:", reply_markup=kb)
+    await m.answer("📢 Наши каналы:", reply_markup=kb)
 
 @dp.message(F.text == "⭐ Мои Stars")
-async def check_balance(message: types.Message):
-    await message.answer(f"Твой баланс: {get_points(message.from_user.id)} Stars ⭐")
+async def check_bal(m: types.Message):
+    await m.answer(f"Твой баланс: {get_points(m.from_user.id)} Stars ⭐")
+
+@dp.message(Command("pay"))
+async def admin_pay(m: types.Message, command: CommandObject):
+    if m.from_user.id == ADMIN_ID:
+        try:
+            args = command.args.split()
+            add_points(int(args[0]), float(args[1]))
+            await m.answer("✅ Начислено!")
+        except: await m.answer("Ошибка! /pay ID сумма")
 
 async def main():
     init_db()
