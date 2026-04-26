@@ -85,6 +85,37 @@ async def start(message: types.Message, command: CommandObject):
     conn.close()
 
 # --- ЛОГИКА ЗАДАНИЙ ПО ПОРЯДКУ ---
+@dp.callback_query(F.data.startswith("skip_"))
+async def skip_task(callback: types.CallbackQuery):
+    t_id = callback.data.replace("skip_", "")
+    user_id = callback.from_user.id
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    # Помечаем задание как выполненное (без начисления баллов)
+    cursor.execute('INSERT OR IGNORE INTO completed_tasks (user_id, task_id) VALUES (?, ?)', (user_id, t_id))
+    conn.commit()
+    conn.close()
+    
+    await callback.answer("⏩ Задание пропущено")
+    await callback.message.delete()
+    
+    # Сразу проверяем, есть ли что-то еще в списке SPONSORS
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT task_id FROM completed_tasks WHERE user_id = ?', (user_id,))
+    done_ids = [r[0] for r in cursor.fetchall()]
+    conn.close()
+    
+    available = [t for t in SPONSORS if t["id"] not in done_ids]
+    
+    if available:
+        # Если есть еще задания - показываем следующее
+        await show_tasks(callback.message)
+    else:
+        # Если больше ничего нет - пишем финал
+        await callback.message.answer("✅ **Все задания выполнены!**\nНовые появятся позже. 🚀", parse_mode="Markdown")
+
 @dp.message(F.text == "📝 Задания")
 async def show_tasks(message: types.Message):
     user_id = message.from_user.id
@@ -95,16 +126,19 @@ async def show_tasks(message: types.Message):
     conn.close()
     
     available = [t for t in SPONSORS if t["id"] not in done_ids]
-    if not available:
-        return await message.answer("✅ Ты выполнил все задания! Новые появятся позже.")
     
-    task = available[0] # Берем строго ПЕРВОЕ по порядку
+    if not available:
+        # Важно: если юзер нажал кнопку, а заданий нет, пишем это сразу
+        return await message.answer("✅ **Все задания выполнены!**\nНовые появятся позже. 🚀", parse_mode="Markdown")
+    
+    task = available[0] # Берем первое из оставшихся
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="1. Подписаться 🛡️", url=task["url"])],
         [InlineKeyboardButton(text="2. Проверить ✅", callback_data=f"check_{task['id']}")],
         [InlineKeyboardButton(text="⏩ Пропустить", callback_data=f"skip_{task['id']}")]
     ])
-    await message.answer(f"🚀 Задание: {task['name']}\nНаграда: {task['reward']} Stars", reply_markup=kb)
+    await message.answer(f"🚀 **Задание:** {task['name']}\nНаграда: {task['reward']} Stars", reply_markup=kb, parse_mode="Markdown")
+
 
 @dp.callback_query(F.data.startswith("check_"))
 async def check_sub(callback: types.CallbackQuery):
