@@ -13,9 +13,9 @@ ADMIN_ID = 8227495662
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "database.db")
 
-# ТУТ НАСТРАИВАЙ КАНАЛЫ (ID и ССЫЛКИ)
+# ТУТ НАСТРАИВАЙ КАНАЛЫ
 TASKS = [
-    {"id": "-1003923958803", "url": "https://t.me/frem4ik1", "name": "Наш основной канал 🛡️", "reward": 0.15},
+    {"id": "-1003923958803", "url": "https://t.me/frem4ik1", "name": "Канал #1 🛡️", "reward": 0.15},
 ]
 
 bot = Bot(token=API_TOKEN)
@@ -81,10 +81,9 @@ async def start(message: types.Message, command: CommandObject):
     else:
         cursor.execute('UPDATE users SET username = ? WHERE id = ?', (username, user_id))
         conn.commit()
-        await message.answer("С возвращением! 🌟", reply_markup=menu_kb)
+        await message.answer("С возвращением в Free Stars! 🌟", reply_markup=menu_kb)
     conn.close()
 
-# --- НОВАЯ КНОПКА: КАНАЛЫ ---
 @dp.message(F.text == "📢 Каналы")
 async def show_channels(message: types.Message):
     text = "📢 **Наши официальные каналы:**\n\n"
@@ -92,7 +91,6 @@ async def show_channels(message: types.Message):
     for t in TASKS:
         text += f"• {t['name']}\n"
         kb.inline_keyboard.append([InlineKeyboardButton(text=f"Перейти в {t['name']}", url=t['url'])])
-    
     await message.answer(text, reply_markup=kb, parse_mode="Markdown")
 
 @dp.message(F.text == "📝 Задания")
@@ -107,14 +105,14 @@ async def show_tasks(message: types.Message):
     available = [t for t in TASKS if t["id"] not in done_ids]
     
     if not available:
-        return await message.answer("✅ Ты выполнил все задания! Новые появятся позже.")
+        return await message.answer("✅ **Все задания выполнены!**\nНовые появятся совсем скоро. 🚀", parse_mode="Markdown")
     
     task = available[0]
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="1. Подписаться 🛡️", url=task["url"])],
         [InlineKeyboardButton(text="2. Проверить ✅", callback_data=f"check_{task['id']}")]
     ])
-    await message.answer(f"🚀 Задание: {task['name']}\nНаграда: {task['reward']} Stars", reply_markup=kb)
+    await message.answer(f"🚀 **Задание:** {task['name']}\nНаграда: {task['reward']} Stars", reply_markup=kb, parse_mode="Markdown")
 
 @dp.callback_query(F.data.startswith("check_"))
 async def check_sub(callback: types.CallbackQuery):
@@ -124,12 +122,9 @@ async def check_sub(callback: types.CallbackQuery):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('SELECT 1 FROM completed_tasks WHERE user_id = ? AND task_id = ?', (user_id, t_id))
-    already_done = cursor.fetchone()
-    
-    if already_done:
+    if cursor.fetchone():
         conn.close()
-        await callback.answer("⚠️ Вы уже получили награду за это задание!", show_alert=True)
-        await callback.message.delete()
+        await callback.message.edit_text("✅ **Задания выполнены!**\nПриходи позже.", parse_mode="Markdown")
         return
 
     t_data = next((t for t in TASKS if t["id"] == t_id), None)
@@ -137,24 +132,34 @@ async def check_sub(callback: types.CallbackQuery):
     try:
         m = await bot.get_chat_member(chat_id=t_id, user_id=user_id)
         if m.status in ["member", "administrator", "creator"]:
-            # СНАЧАЛА ЗАПИСЫВАЕМ В БАЗУ, ЧТО ВЫПОЛНЕНО
             cursor.execute('INSERT INTO completed_tasks (user_id, task_id) VALUES (?, ?)', (user_id, t_id))
             conn.commit()
             conn.close()
             
-            # ПОТОМ НАЧИСЛЯЕМ
             add_points(user_id, t_data["reward"])
             await callback.answer(f"✅ +{t_data['reward']} Stars!", show_alert=True)
-            await callback.message.delete()
-            await show_tasks(callback.message)
+            
+            # Проверка на оставшиеся задания
+            conn_check = sqlite3.connect(DB_PATH)
+            cur_check = conn_check.cursor()
+            cur_check.execute('SELECT task_id FROM completed_tasks WHERE user_id = ?', (user_id,))
+            done_now = [r[0] for r in cur_check.fetchall()]
+            conn_check.close()
+            
+            still_available = [t for t in TASKS if t["id"] not in done_now]
+            
+            if still_available:
+                await callback.message.delete()
+                await show_tasks(callback.message)
+            else:
+                await callback.message.edit_text("🎉 **Ура! Ты выполнил все задания!**", parse_mode="Markdown")
         else:
             conn.close()
             await callback.answer("❌ Сначала подпишись!", show_alert=True)
     except:
         conn.close()
-        await callback.answer("⚠️ Ошибка: Бот не админ в канале или неверный ID канала.", show_alert=True)
+        await callback.answer("⚠️ Ошибка: Бот не админ в канале.", show_alert=True)
 
-# Остальные кнопки (Топ, Мои Stars, Магазин, Рефералы) остаются без изменений...
 @dp.message(F.text == "⭐ Мои Stars")
 async def check_balance(message: types.Message):
     await message.answer(f"Твой баланс: {get_points(message.from_user.id)} Stars ⭐")
@@ -167,16 +172,23 @@ async def shop(message: types.Message):
         [InlineKeyboardButton(text="🍾 Шампанское (45)", callback_data="buy_wine")],
         [InlineKeyboardButton(text="🚀 Ракета (44)", callback_data="buy_rocket")]
     ])
-    await message.answer("🛒 **Магазин**", reply_markup=shop_kb)
+    await message.answer("🛒 **Магазин Free Stars**", reply_markup=shop_kb)
 
 @dp.callback_query(F.data.startswith("buy_"))
 async def process_buy(callback: types.CallbackQuery):
     items = {"buy_bear": ("Мишку", 15), "buy_heart": ("Сердечко", 15), "buy_wine": ("Шампанское", 45), "buy_rocket": ("Ракету", 44)}
     name, price = items[callback.data]
-    if get_points(callback.from_user.id) >= price:
-        add_points(callback.from_user.id, -price)
+    user_id = callback.from_user.id
+    username = callback.from_user.username
+    
+    if get_points(user_id) >= price:
+        add_points(user_id, -price)
         await callback.message.answer(f"✅ Куплено: {name}!")
-        await bot.send_message(ADMIN_ID, f"💰 КУПИЛИ: {name}\nID: `{callback.from_user.id}`")
+        
+        url = f"https://t.me{username}" if username else f"tg://user?id={user_id}"
+        admin_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💬 Написать покупателю", url=url)]])
+        
+        await bot.send_message(ADMIN_ID, f"💰 **НОВАЯ ПОКУПКА!**\n\n👤 Юзер: @{username if username else user_id}\n🎁 Товар: {name}\n🆔 ID: `{user_id}`", parse_mode="Markdown", reply_markup=admin_kb)
     else:
         await callback.answer("❌ Недостаточно Stars!", show_alert=True)
 
@@ -197,6 +209,17 @@ async def show_ref(message: types.Message):
     me = await bot.get_me()
     link = f"https://t.me/{me.username}?start={message.from_user.id}"
     await message.answer(f"👥 Твоя ссылка: `{link}`", parse_mode="Markdown")
+
+@dp.message(Command("pay"))
+async def admin_pay(message: types.Message, command: CommandObject):
+    if message.from_user.id != ADMIN_ID: return 
+    try:
+        args = command.args.split()
+        target_id, amount = int(args[0]), float(args[1])
+        add_points(target_id, amount)
+        await message.answer(f"✅ Начислено {amount} пользователю {target_id}")
+    except:
+        await message.answer("Ошибка! `/pay ID сумма`", parse_mode="Markdown")
 
 async def main():
     init_db()
