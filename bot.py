@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import asyncio
 import sqlite3
 import os
@@ -10,16 +11,9 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMar
 API_TOKEN = '8602042724:AAEWsiiG7wbDz6ZyQbAHEQiMjUWD8ad-I3c'
 ADMIN_ID = 8227495662 
 
-# Пытаемся найти место для сохранения
+# Путь к базе данных на твоем ПК
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "database.db")
-
-# ТЕСТ ПРОВЕРКА: Создаем пустой файл, чтобы увидеть его в списке файлов
-try:
-    with open(os.path.join(BASE_DIR, "PROVERKA.txt"), "w") as f:
-        f.write("Файлы создаются!")
-except Exception as e:
-    print(f"Ошибка записи файла: {e}")
 
 TASKS = [
     {"id": "-1003923958803", "url": "https://t.me", "name": "Спонсор #1 🛡️", "reward": 0.15},
@@ -60,21 +54,15 @@ menu_kb = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="⭐ Мои Stars"), KeyboardButton(text="📝 Задания")],
         [KeyboardButton(text="👥 Рефералы"), KeyboardButton(text="🛒 Магазин")],
-        [KeyboardButton(text="🏆 Топ"), KeyboardButton(text="📁 Где база?")]
+        [KeyboardButton(text="🏆 Топ")] # Топ вернулся на место
     ],
     resize_keyboard=True
 )
-
-@dp.message(F.text == "📁 Где база?")
-async def where_is_db(message: types.Message):
-    exists = "ЕСТЬ" if os.path.exists(DB_PATH) else "НЕТУ"
-    await message.answer(f"📍 **Путь к папке:** `{BASE_DIR}`\n\n📄 **Файл базы:** `{DB_PATH}`\n\n🔎 **Статус:** {exists}", parse_mode="Markdown")
 
 @dp.message(Command("start"))
 async def start(message: types.Message, command: CommandObject):
     user_id = message.from_user.id
     username = message.from_user.username or message.from_user.first_name
-    args = command.args
     
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -82,6 +70,7 @@ async def start(message: types.Message, command: CommandObject):
     is_old = cursor.fetchone()
     
     if not is_old:
+        args = command.args
         ref_id = int(args) if args and args.isdigit() and int(args) != user_id else None
         cursor.execute('INSERT INTO users (id, points, referrer_id, tasks_done, username) VALUES (?, 2.0, ?, 0, ?)', 
                        (user_id, ref_id, username))
@@ -100,9 +89,9 @@ async def admin_pay(message: types.Message, command: CommandObject):
         args = command.args.split()
         target_id, amount = int(args[0]), float(args[1])
         add_points(target_id, amount)
-        await message.answer(f"✅ Начислено {amount} пользователю {target_id}")
+        await message.answer(f"✅ Начислено {amount} Stars пользователю `{target_id}`", parse_mode="Markdown")
     except:
-        await message.answer("Ошибка! Пример: `/pay 12345 100`", parse_mode="Markdown")
+        await message.answer("Ошибка! `/pay ID сумма`")
 
 @dp.message(F.text == "🏆 Топ")
 async def show_leaderboard(message: types.Message):
@@ -111,10 +100,11 @@ async def show_leaderboard(message: types.Message):
     cursor.execute('SELECT username, points FROM users ORDER BY points DESC LIMIT 10')
     top_users = cursor.fetchall()
     conn.close()
-    text = "🏆 **Таблица лидеров**\n\n"
+    text = "🏆 **Таблица лидеров (Топ-10)**\n\n"
     for i, (name, points) in enumerate(top_users, 1):
         medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
-        text += f"{medal} {name} — `{round(points, 2)}` ⭐\n"
+        safe_name = name.replace("_", "\\_") if name else "Аноним"
+        text += f"{medal} {safe_name} — `{round(points, 2)}` ⭐\n"
     await message.answer(text, parse_mode="Markdown")
 
 @dp.message(F.text == "⭐ Мои Stars")
@@ -130,16 +120,34 @@ async def shop(message: types.Message):
         [InlineKeyboardButton(text="🍾 Шампанское (45)", callback_data="buy_wine")],
         [InlineKeyboardButton(text="🚀 Ракета (44)", callback_data="buy_rocket")]
     ])
-    await message.answer("🛒 **Магазин Подарков**", reply_markup=shop_kb)
+    await message.answer("🛒 **Магазин Free Stars**", reply_markup=shop_kb)
 
 @dp.callback_query(F.data.startswith("buy_"))
 async def process_buy(callback: types.CallbackQuery):
     items = {"buy_bear": ("Мишку", 15), "buy_heart": ("Сердечко", 15), "buy_wine": ("Шампанское", 45), "buy_rocket": ("Ракету", 44)}
     name, price = items[callback.data]
-    if get_points(callback.from_user.id) >= price:
-        add_points(callback.from_user.id, -price)
-        await callback.message.answer(f"✅ Куплено: {name}!")
-        await bot.send_message(ADMIN_ID, f"💰 КУПИЛИ: {name}\nID: `{callback.from_user.id}`", parse_mode="Markdown")
+    user_id = callback.from_user.id
+    username = callback.from_user.username
+    
+    if get_points(user_id) >= price:
+        add_points(user_id, -price)
+        await callback.message.answer(f"✅ Куплено: {name}! Админ напишет тебе.")
+        
+        # Кнопка для админа (как на скрине)
+        url = f"https://t.me{username}" if username else f"tg://user?id={user_id}"
+        admin_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💬 Написать покупателю", url=url)]
+        ])
+        
+        # Красивое уведомление админу
+        admin_text = (
+            f"💰 **НОВАЯ ПОКУПКА!**\n\n"
+            f"👤 Юзер: #{username if username else callback.from_user.first_name}\n"
+            f"🎁 Товар: {name}\n"
+            f"🆔 ID: `{user_id}`"
+        )
+        
+        await bot.send_message(ADMIN_ID, admin_text, parse_mode="Markdown", reply_markup=admin_kb)
     else:
         await callback.answer("❌ Мало Stars!", show_alert=True)
 
@@ -159,6 +167,28 @@ async def show_tasks(message: types.Message):
         [InlineKeyboardButton(text="2. Проверить ✅", callback_data=f"check_{task['id']}")]
     ])
     await message.answer(f"🚀 Задание: {task['name']}\nНаграда: {task['reward']} Stars", reply_markup=kb)
+
+@dp.callback_query(F.data.startswith("check_"))
+async def check_sub(callback: types.CallbackQuery):
+    t_id = callback.data.replace("check_", "")
+    user_id = callback.from_user.id
+    t_data = next((t for t in TASKS if t["id"] == t_id), None)
+    try:
+        m = await bot.get_chat_member(chat_id=t_id, user_id=user_id)
+        if m.status in ["member", "administrator", "creator"]:
+            add_points(user_id, t_data["reward"])
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute('INSERT INTO completed_tasks (user_id, task_id) VALUES (?, ?)', (user_id, t_id))
+            conn.commit()
+            conn.close()
+            await callback.answer(f"✅ +{t_data['reward']} Stars!", show_alert=True)
+            await callback.message.delete()
+            await show_tasks(callback.message)
+        else:
+            await callback.answer("❌ Сначала подпишись!", show_alert=True)
+    except:
+        await callback.answer("⚠️ Ошибка. Бот должен быть админом в канале.", show_alert=True)
 
 async def main():
     init_db()
