@@ -151,27 +151,66 @@ async def show_top(m: types.Message):
         text += f"{i}. {name or 'Аноним'} — {round(pts, 2)} ⭐\n"
     await m.answer(text, parse_mode="Markdown")
 
-@dp.message(F.text == "🛒 Магазин")
-async def shop(m: types.Message):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🧸 Мишка (15)", callback_data="buy_bear")],
-        [InlineKeyboardButton(text="❤️ Сердечко (15)", callback_data="buy_heart")],
-        [InlineKeyboardButton(text="🍾 Шампанское (45)", callback_data="buy_wine")],
-        [InlineKeyboardButton(text="🚀 Ракета (44)", callback_data="buy_rocket")]
-    ])
-    await m.answer("🛒 **Магазин**", reply_markup=kb)
-
 @dp.callback_query(F.data.startswith("buy_"))
-async def process_buy(c: types.CallbackQuery):
-    items = {"buy_bear": ("Мишку", 15), "buy_heart": ("Сердечко", 15), "buy_wine": ("Шампанское", 45), "buy_rocket": ("Ракету", 44)}
-    name, price = items[c.data]
-    if get_points(c.from_user.id) >= price:
-        add_points(c.from_user.id, -price)
-        await c.message.answer(f"✅ Куплено: {name}!")
-        contact = f"https://t.me{c.from_user.username}" if c.from_user.username else f"tg://user?id={c.from_user.id}"
-        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💬 Написать", url=contact)]])
-        await bot.send_message(ADMIN_ID, f"💰 **НОВАЯ ПОКУПКА**\nЮзер: @{c.from_user.username or c.from_user.id}\n🎁: {name}", reply_markup=kb)
-    else: await c.answer("❌ Мало Stars!", show_alert=True)
+async def process_buy(callback: types.CallbackQuery):
+    # Список товаров
+    items = {
+        "buy_bear": ("Мишку 🧸", 15), 
+        "buy_heart": ("Сердечко ❤️", 15), 
+        "buy_wine": ("Шампанское 🍾", 45), 
+        "buy_rocket": ("Ракету 🚀", 44)
+    }
+    
+    if callback.data not in items:
+        return
+
+    name, price = items[callback.data]
+    user_id = callback.from_user.id
+    username = callback.from_user.username
+    first_name = callback.from_user.first_name
+    
+    # 1. Проверяем баланс
+    balance = get_points(user_id)
+    
+    if balance >= price:
+        # 2. Списываем звёзды
+        add_points(user_id, -price)
+        
+        # 3. Ответ пользователю
+        await callback.message.answer(f"✅ Успешно куплено: {name}!\nАдмин свяжется с тобой для выдачи подарка.")
+
+        # 4. ГОТОВИМ СМС ДЛЯ АДМИНА (ТЕБЯ)
+        # Формируем ссылку на покупателя
+        contact_url = f"https://t.me{username}" if username else f"tg://user?id={user_id}"
+        admin_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💬 Написать покупателю", url=contact_url)]
+        ])
+
+        admin_text = (
+            f"💰 **НОВАЯ ПОКУПКА В МАГАЗИНЕ!**\n\n"
+            f"🎁 Товар: {name}\n"
+            f"👤 Покупатель: {first_name} (@{username if username else 'нет никнейма'})\n"
+            f"🆔 ID: `{user_id}`\n"
+            f"💳 Остаток баланса: {round(balance - price, 2)} ⭐"
+        )
+
+        # 5. ОТПРАВКА АДМИНУ
+        try:
+            await bot.send_message(
+                chat_id=ADMIN_ID, 
+                text=admin_text, 
+                parse_mode="Markdown", 
+                reply_markup=admin_kb
+            )
+            print(f"✅ Уведомление о покупке {name} отправлено админу.")
+        except Exception as e:
+            # Если не пришло, бот напишет ошибку в черном окне на ПК
+            print(f"❌ ОШИБКА ОТПРАВКИ АДМИНУ: {e}")
+            await callback.message.answer("⚠️ Ошибка уведомления админа, но покупка засчитана.")
+            
+    else:
+        await callback.answer(f"❌ Недостаточно Stars! У тебя {balance}, а нужно {price}", show_alert=True)
+
 
 @dp.message(F.text == "📢 Каналы")
 async def show_chan(m: types.Message):
