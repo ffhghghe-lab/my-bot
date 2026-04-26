@@ -1,12 +1,18 @@
 import asyncio
 import sqlite3
+import os
+import time
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command, CommandObject
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 
 # --- НАСТРОЙКИ ---
 API_TOKEN = '8602042724:AAEWsiiG7wbDz6ZyQbAHEQiMjUWD8ad-I3c'
-ADMIN_ID = 8227495662  # Твой ID
+ADMIN_ID = 8227495662 
+
+# Определение пути к базе данных (чтобы не сбрасывало)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "database.db")
 
 TASKS = [
     {"id": "-1003923958803", "url": "https://t.me", "name": "Спонсор #1 🛡️", "reward": 0.15},
@@ -17,7 +23,7 @@ dp = Dispatcher()
 
 # --- БАЗА ДАННЫХ ---
 def init_db():
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''CREATE TABLE IF NOT EXISTS users 
                       (id INTEGER PRIMARY KEY, points REAL DEFAULT 0, referrer_id INTEGER, tasks_done INTEGER DEFAULT 0, username TEXT)''')
@@ -27,7 +33,7 @@ def init_db():
     conn.close()
 
 def get_points(user_id):
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('SELECT points FROM users WHERE id = ?', (user_id,))
     res = cursor.fetchone()
@@ -35,7 +41,7 @@ def get_points(user_id):
     return round(res[0], 2) if res else 0.0
 
 def add_points(user_id, amount):
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('INSERT OR IGNORE INTO users (id, points, tasks_done) VALUES (?, 0, 0)', (user_id,))
     cursor.execute('UPDATE users SET points = points + ? WHERE id = ?', (amount, user_id))
@@ -46,28 +52,20 @@ def add_points(user_id, amount):
 @dp.message(Command("pay"))
 async def admin_pay(message: types.Message, command: CommandObject):
     if message.from_user.id != ADMIN_ID:
-        return # Игнорируем, если пишет не админ
-
+        return 
     if not command.args:
         return await message.answer("⚠️ Формат: `/pay ID сумма`", parse_mode="Markdown")
-
     try:
         args = command.args.split()
         target_id = int(args[0])
         amount = float(args[1])
-        
         add_points(target_id, amount)
-        
         await message.answer(f"✅ Начислено **{amount}** Stars пользователю `{target_id}`", parse_mode="Markdown")
-        
-        # Уведомляем пользователя
         try:
             await bot.send_message(target_id, f"🎁 Админ начислил тебе **{amount}** Stars!")
-        except:
-            pass
-            
-    except (ValueError, IndexError):
-        await message.answer("❌ Ошибка! Используй: `/pay 12345678 100` (ID и сумма)")
+        except: pass
+    except:
+        await message.answer("❌ Ошибка в команде!")
 
 # --- МЕНЮ ---
 menu_kb = ReplyKeyboardMarkup(
@@ -85,7 +83,7 @@ async def start(message: types.Message, command: CommandObject):
     username = message.from_user.username or message.from_user.first_name
     args = command.args
     
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('SELECT 1 FROM users WHERE id = ?', (user_id,))
     is_old = cursor.fetchone()
@@ -104,18 +102,16 @@ async def start(message: types.Message, command: CommandObject):
 
 @dp.message(F.text == "🏆 Топ")
 async def show_leaderboard(message: types.Message):
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('SELECT username, points FROM users ORDER BY points DESC LIMIT 10')
     top_users = cursor.fetchall()
     conn.close()
-
     text = "🏆 **Таблица лидеров**\n\n"
     for i, (name, points) in enumerate(top_users, 1):
         medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
         safe_name = name.replace("_", "\\_") if name else "Аноним"
         text += f"{medal} {safe_name} — `{round(points, 2)}` ⭐\n"
-    
     await message.answer(text, parse_mode="Markdown")
 
 @dp.message(F.text == "⭐ Мои Stars")
@@ -132,16 +128,14 @@ async def referral_menu(message: types.Message):
 @dp.message(F.text == "📝 Задания")
 async def show_tasks(message: types.Message):
     user_id = message.from_user.id
-    conn = sqlite3.connect('database.db')
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('SELECT task_id FROM completed_tasks WHERE user_id = ?', (user_id,))
     done_ids = [r[0] for r in cursor.fetchall()]
     conn.close()
-    
     available = [t for t in TASKS if t["id"] not in done_ids]
     if not available:
         return await message.answer("✅ Все задания выполнены!")
-    
     task = available[0]
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="1. Подписаться 🛡️", url=task["url"])],
@@ -154,11 +148,10 @@ async def check_sub(callback: types.CallbackQuery):
     t_id = callback.data.replace("check_", "")
     user_id = callback.from_user.id
     t_data = next((t for t in TASKS if t["id"] == t_id), None)
-    
     try:
         m = await bot.get_chat_member(chat_id=t_id, user_id=user_id)
         if m.status in ["member", "administrator", "creator"]:
-            conn = sqlite3.connect('database.db')
+            conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
             cursor.execute('SELECT 1 FROM completed_tasks WHERE user_id = ? AND task_id = ?', (user_id, t_id))
             if not cursor.fetchone():
@@ -178,23 +171,31 @@ async def check_sub(callback: types.CallbackQuery):
 async def shop(message: types.Message):
     shop_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🧸 Мишка (15)", callback_data="buy_bear")],
-        [InlineKeyboardButton(text="❤️ Сердечко (15)", callback_data="buy_heart")]
+        [InlineKeyboardButton(text="❤️ Сердечко (15)", callback_data="buy_heart")],
+        [InlineKeyboardButton(text="🍾 Шампанское (45)", callback_data="buy_wine")],
+        [InlineKeyboardButton(text="🚀 Ракета (44)", callback_data="buy_rocket")]
     ])
     await message.answer("🛒 **Магазин Подарков**", reply_markup=shop_kb)
 
 @dp.callback_query(F.data.startswith("buy_"))
 async def process_buy(callback: types.CallbackQuery):
-    items = {"buy_bear": ("Мишку", 15), "buy_heart": ("Сердечко", 15)}
+    items = {
+        "buy_bear": ("Мишку", 15), 
+        "buy_heart": ("Сердечко", 15),
+        "buy_wine": ("Шампанское", 45), 
+        "buy_rocket": ("Ракету", 44)
+    }
     name, price = items[callback.data]
     if get_points(callback.from_user.id) >= price:
         add_points(callback.from_user.id, -price)
-        await callback.message.answer(f"✅ Куплено: {name}!")
-        await bot.send_message(ADMIN_ID, f"💰 КУПИЛИ: {name}\nЮзер: {callback.from_user.id}")
+        await callback.message.answer(f"✅ Куплено: {name}! Админ свяжется с тобой.")
+        await bot.send_message(ADMIN_ID, f"💰 КУПИЛИ: {name}\nID: `{callback.from_user.id}`", parse_mode="Markdown")
     else:
         await callback.answer("❌ Мало Stars!", show_alert=True)
 
 async def main():
     init_db()
+    print(f"База данных: {DB_PATH}")
     await dp.start_polling(bot)
 
 if __name__ == '__main__':
