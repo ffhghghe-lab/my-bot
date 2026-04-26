@@ -15,7 +15,7 @@ DB_PATH = os.path.join(BASE_DIR, "database.db")
 
 # 1. СПОНСОРЫ (Для заданий) - добавь 3+, чтобы работала рефералка на 1.5 Stars
 SPONSORS = [
-    {"id": "-1003923958803", "url": "https://t.me/frem4ik1", "name": "Спонсор #1 🛡️", "reward": 0.15},
+    {"id": "-1003923958803", "url": "https://t.me/+uatBuhGV_F9jOGZi", "name": "Спонсор #1 🛡️", "reward": 0.15},
     {"id": "-1001234567890", "url": "https://t.me", "name": "Спонсор #2 🎁", "reward": 0.15},
     {"id": "-1001112223334", "url": "https://t.me", "name": "Спонсор #3 🚀", "reward": 0.15},
 ]
@@ -203,17 +203,57 @@ async def shop(message: types.Message):
 
 @dp.callback_query(F.data.startswith("buy_"))
 async def process_buy(callback: types.CallbackQuery):
-    items = {"buy_bear": ("Мишку", 15), "buy_heart": ("Сердечко", 15), "buy_wine": ("Шампанское", 45), "buy_rocket": ("Ракету", 44)}
+    # Список товаров и цен
+    items = {
+        "buy_bear": ("Мишку", 15), 
+        "buy_heart": ("Сердечко", 15), 
+        "buy_wine": ("Шампанское", 45), 
+        "buy_rocket": ("Ракету", 44)
+    }
+    
+    if callback.data not in items:
+        return
+
     name, price = items[callback.data]
-    user_id, username = callback.from_user.id, callback.from_user.username
+    user_id = callback.from_user.id
+    user_first_name = callback.from_user.first_name
+    username = callback.from_user.username
+    
+    # Проверка баланса
     if get_points(user_id) >= price:
-        add_points(user_id, -price)
-        await callback.message.answer(f"✅ Куплено: {name}!")
-        url = f"https://t.me{username}" if username else f"tg://user?id={user_id}"
-        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💬 Написать", url=url)]])
-        await bot.send_message(ADMIN_ID, f"💰 **КУПИЛИ: {name}**\nЮзер: @{username or user_id}", reply_markup=kb)
+        add_points(user_id, -price) # Списываем звезды
+        
+        # Сообщение покупателю
+        await callback.message.answer(f"✅ Куплено: {name}! Ожидай подарок в течение 24 часов.")
+
+        # Ссылка для связи (если нет ника, ведем по ID)
+        contact_url = f"https://t.me{username}" if username else f"tg://user?id={user_id}"
+        
+        # Кнопка для тебя (админа)
+        admin_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💬 Написать покупателю", url=contact_url)]
+        ])
+
+        # ТО САМОЕ КРАСИВОЕ СМС ДЛЯ АДМИНА
+        admin_text = (
+            f"💰 **НОВАЯ ПОКУПКА!**\n\n"
+            f"👤 Юзер: @{username if username else user_first_name}\n"
+            f"🎁 Товар: {name}\n"
+            f"🆔 ID: `{user_id}`"
+        )
+
+        try:
+            await bot.send_message(
+                ADMIN_ID, 
+                admin_text, 
+                parse_mode="Markdown", 
+                reply_markup=admin_kb
+            )
+        except Exception as e:
+            print(f"Ошибка отправки админу: {e}")
+            
     else:
-        await callback.answer("❌ Мало Stars!", show_alert=True)
+        await callback.answer("❌ Недостаточно Stars на балансе!", show_alert=True)
 
 @dp.message(F.text == "📢 Каналы")
 async def show_chan(message: types.Message):
